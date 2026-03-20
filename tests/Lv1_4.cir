@@ -1,0 +1,7 @@
+* LV1-4 Mixed Voltage and Current Sources
+V1 N1 0 DC 5
+I1 N2 0 DC 1m
+R1 N1 N2 2k
+R2 N2 0 1k
+.OP
+.END

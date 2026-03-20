@@ -1,0 +1,6 @@
+* LV2-5 Ground Alias Test
+V1 IN GND DC 9
+R1 IN MID 3k
+R2 MID GROUND 6k
+.OP
+.END

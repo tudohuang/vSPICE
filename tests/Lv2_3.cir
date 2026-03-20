@@ -1,0 +1,6 @@
+* LV2-3 Floating Node
+V1 IN 0 DC 5
+R1 IN MID 1k
+R2 FLOAT 0 2k
+.OP
+.END

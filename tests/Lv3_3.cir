@@ -1,0 +1,6 @@
+* LV3-3 RC High Pass
+V1 IN 0 DC 0 AC 1
+C1 IN OUT 1u
+R1 OUT 0 1k
+.AC DEC 10 10 100000
+.END

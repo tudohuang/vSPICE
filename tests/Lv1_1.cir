@@ -1,0 +1,6 @@
+* LV1-1 Basic Divider
+V1 IN 0 DC 10
+R1 IN MID 1k
+R2 MID 0 1k
+.OP
+.END

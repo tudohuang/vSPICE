@@ -1,0 +1,9 @@
+* LV2-2 Bridge Network
+V1 A 0 DC 10
+R1 A B 1k
+R2 B 0 1k
+R3 A C 1k
+R4 C 0 1k
+R5 B C 1k
+.OP
+.END

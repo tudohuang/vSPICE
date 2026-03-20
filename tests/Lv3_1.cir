@@ -1,0 +1,6 @@
+* LV3-1 DC Sweep
+V1 IN 0 DC 0
+R1 IN MID 1k
+R2 MID 0 1k
+.DC V1 0 10 2
+.END

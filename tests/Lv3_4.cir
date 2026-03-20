@@ -1,0 +1,7 @@
+* LV3-4 OP and AC Source Semantics
+V1 IN 0 DC 5 AC 1
+R1 IN OUT 1k
+C1 OUT 0 1u
+.OP
+.AC DEC 10 10 100000
+.END

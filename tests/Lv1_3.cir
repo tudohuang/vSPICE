@@ -1,0 +1,5 @@
+* LV1-3 Current Source Injection
+I1 N1 0 DC 2m
+R1 N1 0 1k
+.OP
+.END

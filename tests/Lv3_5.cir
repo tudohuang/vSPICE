@@ -1,0 +1,7 @@
+* LV3-5 Parser Stress
+V1 IN 0 DC 10 ; input source
+R1 IN MID 1k
++ 
+R2 MID 0 2k $ divider to ground
+.OP
+.END

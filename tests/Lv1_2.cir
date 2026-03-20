@@ -1,0 +1,7 @@
+* LV1-2 Resistor Ladder
+V1 N1 0 DC 12
+R1 N1 N2 1k
+R2 N2 N3 2k
+R3 N3 0 3k
+.OP
+.END
