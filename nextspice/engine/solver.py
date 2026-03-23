@@ -186,7 +186,7 @@ class Simulator:
             target.value = original_val
             
         return sweep_results
-
+        
     def solve_tran(self, tstep, tstop):
         """暫態分析 (.TRAN)"""
         dim = self._prepare_mna_structure()
@@ -194,23 +194,36 @@ class Simulator:
 
         results = []
 
-        # --- Step 1: Initial Condition (t=0 的初始狀態) ---
-        # 🚀 互感修復：初始 OP 也需要變數地圖
-        op_res = self.solve_op(ctx={'mode': 'op', 'extra_map': self.extra_var_map})
+        # ★★★ 修復 SH_TR03：TRAN 前的 DC OP 要用 t=0 的波形值作為 DC 基準 ★★★
+        saved_dc = {}
+        for el in self.circuit.elements:
+            # 處理電壓源 (V)
+            if hasattr(el, '_eval_tran_voltage') and el.tran:
+                saved_dc[el] = el.dc_value
+                el.dc_value = el._eval_tran_voltage(0.0)
+            # 處理電流源 (I) - 順手防呆！
+            elif hasattr(el, '_eval_tran_current') and el.tran:
+                saved_dc[el] = el.dc_value
+                el.dc_value = el._eval_tran_current(0.0)
+
+        try:
+            # --- Step 1: Initial Condition (t=0 的初始狀態) ---
+            op_res = self.solve_op(ctx={'mode': 'op', 'extra_map': self.extra_var_map})
+        finally:
+            # ★★★ 安全還原：確保無論 OP 是否崩潰，都不會污染元件的原始定義 ★★★
+            for el, val in saved_dc.items():
+                el.dc_value = val
+
         if op_res.status != "SUCCESS":
             return [{"status": "ERROR", "msg": f"Initial OP failed: {op_res.error_msg}"}]
-        
+
         x_prev = op_res.x
         results.append({"time": 0.0, "x": x_prev.copy(), "status": "SUCCESS"})
-
-        # --- Step 2: 喚醒儲能元件的記憶體 ---
+        # --- Step 2: 喚醒儲能元件記憶 (Seeding) ---
+        # 鴨子型別：不問元件種類，只要有 update_history 就呼叫
         for el in self.circuit.elements:
             if hasattr(el, 'update_history'):
-                if el.__class__.__name__ == 'Capacitor':
-                    el.update_history(x_prev)
-                elif el.__class__.__name__ == 'Inductor':
-                    extra_idx = self.extra_var_map.get(el)
-                    el.update_history(x_prev, extra_idx)
+                el.update_history(x_prev, extra_idx=self.extra_var_map.get(el))
 
         # --- Step 3: 開始時間迴圈 (Time Marching) ---
         t_points = np.arange(tstep, tstop + (tstep * 0.1), tstep)
@@ -219,7 +232,6 @@ class Simulator:
             A = np.zeros((dim, dim), dtype=np.float64)
             b = np.zeros(dim, dtype=np.float64)
             
-            # 🚀 互感修復：把 extra_map 塞進時域 ctx 裡
             ctx = {'mode': 'tran', 't': t, 'dt': tstep, 'extra_map': self.extra_var_map}
             
             for el in self.circuit.elements:
@@ -230,15 +242,11 @@ class Simulator:
                 x_new = np.linalg.solve(A, b)
                 results.append({"time": t, "x": x_new.copy(), "status": "SUCCESS"})
                 
-                # --- Step 4: 更新歷史 ---
+                # --- Step 4: 更新歷史 (為下個 dt 準備) ---
                 for el in self.circuit.elements:
                     if hasattr(el, 'update_history'):
-                        if el.__class__.__name__ == 'Capacitor':
-                            el.update_history(x_new)
-                        elif el.__class__.__name__ == 'Inductor':
-                            extra_idx = self.extra_var_map.get(el)
-                            el.update_history(x_new, extra_idx)
-                            
+                        el.update_history(x_new, extra_idx=self.extra_var_map.get(el))
+                        
             except np.linalg.LinAlgError as e:
                 results.append({"time": t, "status": "SINGULAR", "msg": str(e)})
                 break
@@ -247,6 +255,7 @@ class Simulator:
                 break
                 
         return results
+
 
     def get_full_report(self, solution_vec):
         """

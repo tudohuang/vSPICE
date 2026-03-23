@@ -79,6 +79,8 @@ class SpiceParser:
         return processed
 
     def _tokenize(self, content: str) -> list:
+        # 把 {} 裡面的空白通通消除，確保它不會被 split 拆散
+        content = re.sub(r'\{([^}]+)\}', lambda m: '{' + m.group(1).replace(' ', '') + '}', content)
         clean_line = content.replace('(', ' ( ').replace(')', ' ) ').replace(',', ' ')
         return [t.strip() for t in clean_line.split() if t.strip()]
 
@@ -104,7 +106,42 @@ class SpiceParser:
         n = str(node_str).upper()
         return "0" if n in ["GND", "GROUND"] else n
 
+
+    def _build_param_env(self, raw_ast):
+        """第一遍掃描：建立參數變數環境"""
+        self.param_env = {}
+        import math
+        # 將 math 函式庫裡的東西全部轉大寫存入 (例如 pi -> PI, sin -> SIN)
+        for k in dir(math):
+            if not k.startswith('_'): 
+                self.param_env[k.upper()] = getattr(math, k)
+
+        for item in raw_ast:
+            if item["kind"] == "directive" and item["tokens"][0].upper() == ".PARAM":
+                s = " ".join(item["tokens"][1:])
+                pairs = re.findall(r'([A-Z0-9_]+)\s*=\s*([^\s]+)', s, re.I)
+                for k, v in pairs:
+                    try:
+                        self.param_env[k.upper()] = UnitConverter.parse(v)
+                    except:
+                        self.param_env[k.upper()] = v
+
+    def _eval_val(self, val_str):
+        """運算大括號內的表達式，或進行單位轉換"""
+        val_str = str(val_str)
+        if val_str.startswith('{') and val_str.endswith('}'):
+            expr = val_str[1:-1].upper() # 提取 {} 內的算式
+            try:
+                result = eval(expr, {"__builtins__": None}, self.param_env)
+                return float(result)
+            except Exception as e:
+                raise ValueError(f"Failed to evaluate param expression '{expr}': {e}")
+        return UnitConverter.parse(val_str)
+
+
+
     def _normalize_to_canonical(self, raw_ast):
+        self._build_param_env(raw_ast)
         seen_elements = set()
 
         for item in raw_ast:
@@ -126,6 +163,9 @@ class SpiceParser:
                     elif prefix == 'K': self._parse_mutual_inductance(item)
                     elif prefix in ['V', 'I']: self._parse_source(item, prefix)
                     elif prefix == 'E': self._parse_vcvs(item)
+                    elif prefix == 'G': self._parse_vccs(item)  # 新增
+                    elif prefix == 'H': self._parse_ccvs(item)  # 新增
+                    elif prefix == 'F': self._parse_cccs(item)  # 新增
                     elif prefix == 'D': self._parse_diode(item)
                     elif prefix == 'X': self._parse_subckt_call(item) 
                     else:
@@ -155,7 +195,7 @@ class SpiceParser:
         self.circuit["elements"].append({
             "type": "resistor", "name": tk[0].upper(),
             "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
-            "value": UnitConverter.parse(tk[3])
+            "value": self._eval_val(tk[3])  # 🚀 改用數學引擎
         })
 
     def _parse_source(self, item, prefix):
@@ -186,13 +226,13 @@ class SpiceParser:
         while i < len(tokens):
             t = tokens[i].upper()
             if t == "DC" and i + 1 < len(tokens):
-                spec["dc_value"] = UnitConverter.parse(tokens[i + 1])
+                spec["dc_value"] = self._eval_val(tokens[i + 1]) # 🚀 改用數學引擎
                 i += 2
             elif t == "AC" and i + 1 < len(tokens):
-                spec["ac_magnitude"] = UnitConverter.parse(tokens[i + 1])
+                spec["ac_magnitude"] = self._eval_val(tokens[i + 1]) # 🚀 改用數學引擎
                 if i + 2 < len(tokens):
                     try:
-                        spec["ac_phase_deg"] = UnitConverter.parse(tokens[i + 2])
+                        spec["ac_phase_deg"] = self._eval_val(tokens[i + 2]) # 🚀 改用數學引擎
                         i += 3; continue
                     except: pass
                 spec["ac_phase_deg"] = 0.0
@@ -200,7 +240,7 @@ class SpiceParser:
             else:
                 if spec["dc_value"] is None:
                     try:
-                        spec["dc_value"] = UnitConverter.parse(tokens[i])
+                        spec["dc_value"] = self._eval_val(tokens[i]) # 🚀 改用數學引擎
                         i += 1; continue
                     except: pass
                 break
@@ -215,7 +255,37 @@ class SpiceParser:
             "type": "vcvs", "name": tk[0].upper(),
             "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
             "ctrl_pins": {"cp": self._norm_node(tk[3]), "cn": self._norm_node(tk[4])},
-            "gain": UnitConverter.parse(tk[5])
+            "gain": self._eval_val(tk[5]) # 🚀 改用數學引擎
+        })
+
+    def _parse_vccs(self, item): # G
+        tk = item["tokens"]
+        if len(tk) < 6: raise ValueError("VCCS (G) requires 4 nodes and transconductance")
+        self.circuit["elements"].append({
+            "type": "vccs", "name": tk[0].upper(),
+            "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
+            "ctrl_pins": {"cp": self._norm_node(tk[3]), "cn": self._norm_node(tk[4])},
+            "gain": self._eval_val(tk[5])
+        })
+
+    def _parse_ccvs(self, item): # H
+        tk = item["tokens"]
+        if len(tk) < 5: raise ValueError("CCVS (H) requires 2 nodes, ctrl source, and transresistance")
+        self.circuit["elements"].append({
+            "type": "ccvs", "name": tk[0].upper(),
+            "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
+            "ctrl_source": tk[3].upper(),
+            "gain": self._eval_val(tk[4])
+        })
+
+    def _parse_cccs(self, item): # F
+        tk = item["tokens"]
+        if len(tk) < 5: raise ValueError("CCCS (F) requires 2 nodes, ctrl source, and gain")
+        self.circuit["elements"].append({
+            "type": "cccs", "name": tk[0].upper(),
+            "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
+            "ctrl_source": tk[3].upper(),
+            "gain": self._eval_val(tk[4])
         })
 
     def _parse_capacitor(self, item):
@@ -224,7 +294,7 @@ class SpiceParser:
         self.circuit["elements"].append({
             "type": "capacitor", "name": tk[0].upper(),
             "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
-            "value": UnitConverter.parse(tk[3])
+            "value": self._eval_val(tk[3]) # 🚀 改用數學引擎
         })
 
     def _parse_inductor(self, item):
@@ -233,20 +303,18 @@ class SpiceParser:
         self.circuit["elements"].append({
             "type": "inductor", "name": tk[0].upper(),
             "pins": {"p": self._norm_node(tk[1]), "n": self._norm_node(tk[2])},
-            "value": UnitConverter.parse(tk[3])
+            "value": self._eval_val(tk[3]) # 🚀 改用數學引擎
         })
 
-    # 🚀 新增：互感 (Mutual Inductance) 解析器
     def _parse_mutual_inductance(self, item):
         tk = item["tokens"]
         if len(tk) < 4: raise ValueError("K requires 2 target inductors and a coupling coefficient")
         self.circuit["elements"].append({
             "type": "mutual_inductance", 
             "name": tk[0].upper(),
-            # K 元件沒有自己的接腳，它直接綁定兩個電感的名字
             "element1": tk[1].upper(),
             "element2": tk[2].upper(),
-            "value": UnitConverter.parse(tk[3])
+            "value": self._eval_val(tk[3]) # 🚀 改用數學引擎
         })
 
     def _parse_diode(self, item):
@@ -274,22 +342,22 @@ class SpiceParser:
         if len(tk) < 5: raise ValueError(".AC requires sweep, points, fstart, fstop")
         self.circuit["analyses"].append({
             "type": "ac", "sweep": tk[1].upper(), "points": int(tk[2]),
-            "fstart": UnitConverter.parse(tk[3]), "fstop": UnitConverter.parse(tk[4])
+            "fstart": self._eval_val(tk[3]), "fstop": self._eval_val(tk[4]) # 🚀 改用數學引擎
         })
 
     def _parse_tran(self, item):
         tk = item["tokens"]
         if len(tk) < 3: raise ValueError(".TRAN requires tstep and tstop")
         self.circuit["analyses"].append({
-            "type": "tran", "tstep": UnitConverter.parse(tk[1]), "tstop": UnitConverter.parse(tk[2])
+            "type": "tran", "tstep": self._eval_val(tk[1]), "tstop": self._eval_val(tk[2]) # 🚀 改用數學引擎
         })
 
     def _parse_dc(self, item):
         tk = item["tokens"]
         if len(tk) < 5: raise ValueError(".DC requires source, start, stop, step")
         self.circuit["analyses"].append({
-            "type": "dc", "source": tk[1].upper(), "start": UnitConverter.parse(tk[2]),
-            "stop": UnitConverter.parse(tk[3]), "step": UnitConverter.parse(tk[4])
+            "type": "dc", "source": tk[1].upper(), "start": self._eval_val(tk[2]),
+            "stop": self._eval_val(tk[3]), "step": self._eval_val(tk[4]) # 🚀 改用數學引擎
         })
 
     def _parse_param(self, item):
@@ -305,7 +373,6 @@ class SpiceParser:
             "name": tk[1].upper(), "type": tk[2].upper(),
             "raw_body": " ".join(tk[3:])
         })
-
     # --- 4. Diagnostics & Validation ---
 
     def _validate_circuit(self):
@@ -326,3 +393,5 @@ class SpiceParser:
 
     def _log_diag(self, ln, sev, msg):
         self.diagnostics.append({"line": ln, "severity": sev, "message": msg})
+
+    

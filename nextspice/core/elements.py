@@ -70,14 +70,11 @@ class Capacitor(BaseElement):
             # 電容在 DC 下是斷路 (Open Circuit)，所以矩陣什麼都不用加
             pass
 
-    def update_history(self, x):
-        """
-        時間推進的關鍵：由 Solver 在解完矩陣後呼叫，
-        讓電容把「現在解出來的電壓」存起來，變成下一步的「歷史」。
-        """
-        v1 = x[self.n1-1] if self.n1 > 0 else 0.0
-        v2 = x[self.n2-1] if self.n2 > 0 else 0.0
-        self.v_prev = v1 - v2
+    def update_history(self, x, extra_idx=None):
+        # 電容不需要 extra_idx，但必須接收它以符合統一介面 (Duck Typing)
+        v_p = x[self.n1 - 1] if self.n1 > 0 else 0.0
+        v_n = x[self.n2 - 1] if self.n2 > 0 else 0.0
+        self.v_prev = v_p - v_n
 
 
 class VoltageSource(BaseElement):
@@ -262,13 +259,10 @@ class Inductor(BaseElement):
         else:
             b[extra_idx] = 0.0
 
-    def update_history(self, x, extra_idx):
-        """
-        時間推進的關鍵：由 Solver 在解完矩陣後呼叫，
-        讓電感記住「現在流過我的電流」，變成下一步的「歷史」。
-        """
-        # 因為電感的電流剛好就是存在 extra_idx 裡面的變數！
-        self.i_prev = x[extra_idx]
+    def update_history(self, x, extra_idx=None):
+        # 電感必須依賴 extra_idx 來抓取自己流過的歷史電流
+        if extra_idx is not None:
+            self.i_prev = x[extra_idx]
 
 
 class MutualInductance(BaseElement):
@@ -322,3 +316,60 @@ class MutualInductance(BaseElement):
         else:
             # OP / DC：DC 狀態下互感沒有任何作用（di/dt = 0）
             pass
+
+
+class VCCS(BaseElement):
+    """壓控電流源 (G)"""
+    def __init__(self, name, np, nn, cp, cn, transconductance):
+        super().__init__(name)
+        self.np, self.nn = np, nn
+        self.cp, self.cn = cp, cn
+        self.g = float(transconductance)
+
+    def stamp(self, A, b, extra_idx=None, ctx=None):
+        if self.np > 0 and self.cp > 0: A[self.np-1, self.cp-1] += self.g
+        if self.np > 0 and self.cn > 0: A[self.np-1, self.cn-1] -= self.g
+        if self.nn > 0 and self.cp > 0: A[self.nn-1, self.cp-1] -= self.g
+        if self.nn > 0 and self.cn > 0: A[self.nn-1, self.cn-1] += self.g
+
+class CCVS(BaseElement):
+    """流控電壓源 (H)"""
+    def __init__(self, name, np, nn, ctrl_source, transresistance):
+        super().__init__(name)
+        self.np, self.nn = np, nn
+        self.ctrl_source = ctrl_source.upper() # 控制源名稱 (例如 V1)
+        self.rm = float(transresistance)
+        self.extra_vars = 1
+
+    def stamp(self, A, b, extra_idx, ctx=None):
+        # 從 ctx 取得控制電壓源的矩陣索引
+        ctrl_idx = ctx.get('extra_by_name', {}).get(self.ctrl_source)
+        if ctrl_idx is None:
+            raise ValueError(f"Controlling source '{self.ctrl_source}' not found for {self.name}")
+
+        if self.np > 0:
+            A[self.np-1, extra_idx] += 1.0
+            A[extra_idx, self.np-1] += 1.0
+        if self.nn > 0:
+            A[self.nn-1, extra_idx] -= 1.0
+            A[extra_idx, self.nn-1] -= 1.0
+        
+        # 核心：流控關係 V_out = Rm * I_ctrl
+        A[extra_idx, ctrl_idx] -= self.rm
+
+class CCCS(BaseElement):
+    """流控電流源 (F)"""
+    def __init__(self, name, np, nn, ctrl_source, gain):
+        super().__init__(name)
+        self.np, self.nn = np, nn
+        self.ctrl_source = ctrl_source.upper()
+        self.gain = float(gain)
+
+    def stamp(self, A, b, extra_idx=None, ctx=None):
+        ctrl_idx = ctx.get('extra_by_name', {}).get(self.ctrl_source)
+        if ctrl_idx is None:
+            raise ValueError(f"Controlling source '{self.ctrl_source}' not found for {self.name}")
+        
+        # 注入電流 I_out = gain * I_ctrl
+        if self.np > 0: A[self.np-1, ctrl_idx] += self.gain
+        if self.nn > 0: A[self.nn-1, ctrl_idx] -= self.gain

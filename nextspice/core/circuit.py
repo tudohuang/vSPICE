@@ -1,4 +1,4 @@
-from .elements import Resistor, VoltageSource, CurrentSource, Capacitor, Inductor, MutualInductance,VCVS
+from .elements import Resistor, VoltageSource, CurrentSource, Capacitor, Inductor, MutualInductance,VCVS, VCCS, CCVS, CCCS
 from .unit_conv import UnitConverter
 class NodeManager:
     """
@@ -145,6 +145,24 @@ class Circuit:
                     cp = self.node_mgr.get_index(entry["ctrl_pins"]["cp"])
                     cn = self.node_mgr.get_index(entry["ctrl_pins"]["cn"])
                     self.add_element(VCVS(ename, p, n, cp, cn, entry["gain"]))
+
+                elif etype == "vccs":
+                    p = self.node_mgr.get_index(entry["pins"]["p"])
+                    n = self.node_mgr.get_index(entry["pins"]["n"])
+                    cp = self.node_mgr.get_index(entry["ctrl_pins"]["cp"])
+                    cn = self.node_mgr.get_index(entry["ctrl_pins"]["cn"])
+                    self.add_element(VCCS(ename, p, n, cp, cn, entry["gain"]))
+
+                elif etype in ["ccvs", "cccs"]:
+                    p = self.node_mgr.get_index(entry["pins"]["p"])
+                    n = self.node_mgr.get_index(entry["pins"]["n"])
+                    ctrl_src = entry["ctrl_source"]
+                    gain = entry["gain"]
+                    if etype == "ccvs":
+                        self.add_element(CCVS(ename, p, n, ctrl_src, gain))
+                    else:
+                        self.add_element(CCCS(ename, p, n, ctrl_src, gain))
+
 
 
                 elif etype in ["diode", "mosfet"]:
