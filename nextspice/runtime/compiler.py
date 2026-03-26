@@ -1,7 +1,7 @@
 import re
 import os
 import datetime
-from .unit_conv import UnitConverter
+from nextspice.utils.unit_conv import UnitConverter
 
 class SpiceParser:
     """
@@ -16,11 +16,15 @@ class SpiceParser:
         
         self.circuit = {
             "schema": "nextspice.circuit.v0.1",
+            "name": "Untitled", # 🚀 新增：網表標題
             "metadata": {
                 "source": os.path.basename(self.file_path),
                 "compiled_at": "",
-                "ground_node": "0"
+                "ground_node": "0",
+                "measures": [] 
             },
+            "options": {},    
+            "outputs": [],   
             "elements": [],
             "models": [],
             "analyses": [],
@@ -28,26 +32,36 @@ class SpiceParser:
         }
 
     def compile(self):
-        self.circuit["metadata"]["compiled_at"] = datetime.datetime.now().isoformat()
-        
-        if self.raw_content is None:
-            if not os.path.exists(self.file_path):
-                self._log_diag(0, "ERROR", f"File not found: {self.file_path}")
-                return {"circuit": self.circuit, "diagnostics": self.diagnostics}
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                raw_lines = f.readlines()
-        else:
-            raw_lines = self.raw_content.splitlines()
+            self.circuit["metadata"]["compiled_at"] = datetime.datetime.now().isoformat()
+            
+            if self.raw_content is None:
+                if not os.path.exists(self.file_path):
+                    self._log_diag(0, "ERROR", f"File not found: {self.file_path}")
+                    return {"circuit": self.circuit, "diagnostics": self.diagnostics}
+                with open(self.file_path, 'r', encoding='utf-8') as f:
+                    raw_lines = f.readlines()
+            else:
+                raw_lines = self.raw_content.splitlines()
 
-        preprocessed = self._preprocess(raw_lines)
-        raw_ast = self._parse_to_raw_ast(preprocessed)
-        self._normalize_to_canonical(raw_ast)
-        self._validate_circuit()
-        
-        return {
-            "circuit": self.circuit,
-            "diagnostics": self.diagnostics
-        }
+            for i, line in enumerate(raw_lines):
+                stripped = line.strip()
+                if stripped:
+                    if not stripped.startswith('*'):
+                        self.circuit["name"] = stripped
+                        raw_lines[i] = "* " + stripped
+                    else:
+                        self.circuit["name"] = stripped[1:].strip()
+                    break
+
+            preprocessed = self._preprocess(raw_lines)
+            raw_ast = self._parse_to_raw_ast(preprocessed)
+            self._normalize_to_canonical(raw_ast)
+            self._validate_circuit()
+            
+            return {
+                "circuit": self.circuit,
+                "diagnostics": self.diagnostics
+            }
 
     def _preprocess(self, raw_lines):
         processed = []
@@ -182,6 +196,9 @@ class SpiceParser:
                     elif cmd == '.OP': self.circuit["analyses"].append({"type": "op"})
                     elif cmd == '.PARAM': self._parse_param(item)
                     elif cmd == '.MODEL': self._parse_model(item)
+                    elif cmd == '.OPTIONS': self._parse_options(item)
+                    elif cmd in ['.PRINT', '.PLOT']: self._parse_output(item)
+                    elif cmd in ['.MEAS', '.MEASURE']: self._parse_measure(item)
                     else:
                         self._log_diag(ln, "INFO", f"Ignored directive: {cmd}")
                 except Exception as e:
@@ -373,6 +390,45 @@ class SpiceParser:
             "name": tk[1].upper(), "type": tk[2].upper(),
             "raw_body": " ".join(tk[3:])
         })
+
+    def _parse_options(self, item):
+        tk = item["tokens"][1:]
+        for token in tk:
+            if '=' in token:
+                key, val = token.split('=', 1)
+                try:
+                    # 嘗試將數值轉換，例如 1m 變成 0.001
+                    self.circuit["options"][key.upper()] = self._eval_val(val)
+                except:
+                    # 如果不是數字（例如 METHOD=GEAR），就存字串
+                    self.circuit["options"][key.upper()] = val.upper()
+            else:
+                # Boolean flag (例如 NODE)
+                self.circuit["options"][token.upper()] = True
+
+    def _parse_output(self, item):
+        tk = item["tokens"]
+        if len(tk) < 3: 
+            self._log_diag(item["line_no"], "WARNING", f"{tk[0]} requires analysis type and targets")
+            return
+        self.circuit["outputs"].append({
+            "directive": tk[0][1:].upper(),
+            "analysis": tk[1].upper(),
+            "targets": [v.upper() for v in tk[2:]]
+        })
+
+    def _parse_measure(self, item):
+        tk = item["tokens"]
+        if len(tk) < 4:
+            self._log_diag(item["line_no"], "WARNING", ".MEASURE requires analysis, name, and expressions")
+            return
+        self.circuit["metadata"]["measures"].append({
+            "type": "measure",
+            "analysis_type": tk[1].upper(),
+            "name": tk[2].upper(),
+            "raw_args": tk[3:]
+        })
+
     # --- 4. Diagnostics & Validation ---
 
     def _validate_circuit(self):

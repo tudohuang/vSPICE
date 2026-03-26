@@ -370,7 +370,6 @@
 
 <body>
     <input type="file" id="folder-input" webkitdirectory directory multiple onchange="loadWorkspace(event)">
-
     <div class="menu-bar">
         <div class="menu-item">File
             <div class="dropdown">
@@ -383,6 +382,8 @@
         <div class="menu-item">Edit
             <div class="dropdown">
                 <div class="drop-item" onclick="if(window.editor) window.editor.setValue('')">Clear Editor</div>
+                <div class="drop-item" onclick="formatCode()">Format Code <span class="shortcut">Alt+Shift+F</span>
+                </div>
             </div>
         </div>
         <div class="menu-item">Terminal
@@ -395,6 +396,7 @@
 
     <div class="toolbar">
         <button class="tool-btn primary" onclick="runSimulation()">Run Simulation</button>
+        <button class="tool-btn" onclick="formatCode()">✨ Format</button>
         <button class="tool-btn" onclick="exportCSV()">Export CSV</button>
     </div>
 
@@ -446,6 +448,7 @@
                 language: 'ini', theme: 'vs-dark', automaticLayout: true, fontSize: 13, fontFamily: "'Consolas', monospace", minimap: { enabled: false }, scrollBeyondLastLine: false, padding: { top: 10, bottom: 10 }
             });
             window.editor.addCommand(monaco.KeyCode.F5, function () { runSimulation(); });
+            window.editor.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, function () { formatCode(); });
         });
 
         const consoleOut = document.getElementById('console-output');
@@ -650,6 +653,31 @@
                 appendLog("[OK] CSV Downloaded.", "success");
             } catch (err) {
                 appendLog(`[ERR] Export Failed: ${err.message}`, "error");
+            }
+        }
+    </script>
+
+    <script>
+        // 🚀 修正後的 formatCode 函數
+        async function formatCode() {
+            if (!window.editor) return;
+            try {
+                const code = window.editor.getValue();
+                const response = await fetch('/api/format', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code })
+                });
+
+                if (!response.ok) throw new Error("Server Error");
+
+                const result = await response.json();
+                if (result.code) {
+                    window.editor.setValue(result.code);
+                    appendLog("[OK] Code Formatted.", "success");
+                }
+            } catch (err) {
+                appendLog(`[ERR] Format failed: ${err.message}`, "error");
             }
         }
     </script>
