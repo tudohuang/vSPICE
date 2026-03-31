@@ -19,7 +19,7 @@ SUPPORTED_ELEMENTS = {
     "K": "Mutual Inductance", "X": "Subcircuit Call","Q":"BJT"
 }
 SUPPORTED_ANALYSES = [".OP", ".TRAN", ".AC", ".DC", ".SENS"]
-SUPPORTED_DIRECTIVES = [".MODEL", ".OPTIONS", ".PRINT", ".PROBE", ".MEAS", ".MEASURE", ".STEP", ".SUBCKT", ".ENDS", ".PARAM", ".END"]
+SUPPORTED_DIRECTIVES = [".MODEL", ".OPTIONS", ".PRINT", ".PROBE", ".MEAS", ".MEASURE", ".FOUR", ".STEP", ".SUBCKT", ".ENDS", ".PARAM", ".END"]
 SUPPORTED_WAVEFORMS = ["SIN", "PULSE", "PWL"]
 
 class NetlistRequest(BaseModel):

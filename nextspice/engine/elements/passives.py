@@ -36,17 +36,13 @@ class Capacitor(BaseElement):
         super().__init__(name)
         self.n1, self.n2 = n1, n2
         self.value = float(value)
-        self.v_prev = 0.0
-        self.i_prev = 0.0
         
+        # 🚀 乾淨！不再自己記住歷史狀態
         if self.value <= 0:
             raise ValueError(f"[Capacitor] {self.name} 的電容值必須大於 0，目前為 {self.value}")
 
     def stamp(self, A, b, extra_idx=None, ctx=None):
-        ctx = ctx or {}
-        mode = ctx.get('mode', 'op')
-        
-        if mode in ('dc', 'op'):
+        if ctx.mode in ('dc', 'op'):
             # DC OP 視為開路，補上極小電導防止浮接節點導致矩陣無法求解
             if self.n1 > 0: A[self.n1 - 1, self.n1 - 1] += GMIN_DC_PULLDOWN
             if self.n2 > 0: A[self.n2 - 1, self.n2 - 1] += GMIN_DC_PULLDOWN
@@ -54,9 +50,8 @@ class Capacitor(BaseElement):
                 A[self.n1 - 1, self.n2 - 1] -= GMIN_DC_PULLDOWN
                 A[self.n2 - 1, self.n1 - 1] -= GMIN_DC_PULLDOWN
                 
-        elif mode == 'ac':
-            freq = ctx.get('freq', 1.0)
-            omega = 2.0 * math.pi * freq
+        elif ctx.mode == 'ac':
+            omega = 2.0 * math.pi * ctx.freq
             y_c = complex(0, omega * self.value)
             if self.n1 > 0: A[self.n1 - 1, self.n1 - 1] += y_c
             if self.n2 > 0: A[self.n2 - 1, self.n2 - 1] += y_c
@@ -64,18 +59,21 @@ class Capacitor(BaseElement):
                 A[self.n1 - 1, self.n2 - 1] -= y_c
                 A[self.n2 - 1, self.n1 - 1] -= y_c
                 
-        elif mode == 'tran':
-            dt = ctx.get('dt', DEFAULT_DT)
-            method = ctx.get('integration', 'trapezoidal')
-            if method == 'gear2':
-                g_eq = 1.5 * self.value / dt
-                i_hist = self.value / dt * (2.0 * self.v_prev - 0.5 * getattr(self, 'v_prev2', self.v_prev))
-            elif method == 'trapezoidal':
-                g_eq = 2.0 * self.value / dt
-                i_hist = g_eq * self.v_prev + self.i_prev
+        elif ctx.mode == 'tran':
+            # 🚀 從狀態管理器撈資料
+            v_prev = ctx.state_mgr.get(self, 'v_prev', 0.0)
+            i_prev = ctx.state_mgr.get(self, 'i_prev', 0.0)
+            
+            if ctx.integration == 'gear2':
+                v_prev2 = ctx.state_mgr.get(self, 'v_prev2', 0.0)
+                g_eq = 1.5 * self.value / ctx.dt
+                i_hist = self.value / ctx.dt * (2.0 * v_prev - 0.5 * v_prev2)
+            elif ctx.integration == 'trapezoidal':
+                g_eq = 2.0 * self.value / ctx.dt
+                i_hist = g_eq * v_prev + i_prev
             else:
-                g_eq = self.value / dt
-                i_hist = g_eq * self.v_prev
+                g_eq = self.value / ctx.dt
+                i_hist = g_eq * v_prev
 
             if self.n1 > 0:
                 A[self.n1 - 1, self.n1 - 1] += g_eq
@@ -87,18 +85,22 @@ class Capacitor(BaseElement):
                 A[self.n1 - 1, self.n2 - 1] -= g_eq
                 A[self.n2 - 1, self.n1 - 1] -= g_eq
 
-    def update_history(self, x, extra_idx=None, ctx=None, **kwargs):
-        ctx = ctx or kwargs  
+    def update_history(self, x, extra_idx=None, ctx=None):
         v_p = x[self.n1 - 1] if self.n1 > 0 else 0.0
         v_n = x[self.n2 - 1] if self.n2 > 0 else 0.0
         v_now = v_p - v_n
-        dt = ctx.get('dt')
-        method = ctx.get('integration', 'trapezoidal')
-        self.v_prev2 = self.v_prev  
-        if method == 'trapezoidal' and dt:
-            g_eq = 2.0 * self.value / dt
-            self.i_prev = g_eq * (v_now - self.v_prev) - self.i_prev
-        self.v_prev = v_now
+        
+        # 🚀 先把現在的 v_prev 存成 v_prev2 (給 Gear2 用)
+        v_prev = ctx.state_mgr.get(self, 'v_prev', 0.0)
+        ctx.state_mgr.set(self, 'v_prev2', v_prev)
+        
+        if ctx.integration == 'trapezoidal' and ctx.dt:
+            g_eq = 2.0 * self.value / ctx.dt
+            i_prev = ctx.state_mgr.get(self, 'i_prev', 0.0)
+            i_now = g_eq * (v_now - v_prev) - i_prev
+            ctx.state_mgr.set(self, 'i_prev', i_now)
+            
+        ctx.state_mgr.set(self, 'v_prev', v_now)
 
 
 class Inductor(BaseElement):
@@ -112,9 +114,9 @@ class Inductor(BaseElement):
         super().__init__(name)
         self.n1, self.n2 = n1, n2
         self.value = float(value)
-        self.i_prev, self.v_prev = 0.0, 0.0
         self.extra_vars = 1
         
+        # 🚀 移除 self.i_prev, self.v_prev
         if self.value <= 0:
             raise ValueError(f"[Inductor] {self.name} 的電感值必須大於 0")
 
@@ -122,24 +124,20 @@ class Inductor(BaseElement):
         if extra_idx is None:
             raise ValueError(f"[{self.name}] 致命錯誤：未分配到 extra_idx")
             
-        ctx = ctx or {}
-        mode = ctx.get('mode', 'op')
         idx = extra_idx
         
-        if mode in ('dc', 'op'):
+        if ctx.mode in ('dc', 'op'):
             if self.n1 > 0:
                 A[self.n1 - 1, idx] += 1.0
                 A[idx, self.n1 - 1] += 1.0
             if self.n2 > 0:
                 A[self.n2 - 1, idx] -= 1.0
                 A[idx, self.n2 - 1] -= 1.0
-            # 🚀 修正：明確補上 RHS 為 0，並使用支路專用補丁
-            b[idx] = 0.0
+            b[idx] += 0.0
             A[idx, idx] -= GMIN_BRANCH_PATCH
             
-        elif mode == 'ac':
-            freq = ctx.get('freq', 1.0)
-            omega = 2.0 * math.pi * freq
+        elif ctx.mode == 'ac':
+            omega = 2.0 * math.pi * ctx.freq
             z_l = complex(0, omega * self.value)
             if self.n1 > 0:
                 A[self.n1 - 1, idx] += 1.0
@@ -149,18 +147,20 @@ class Inductor(BaseElement):
                 A[idx, self.n2 - 1] -= 1.0
             A[idx, idx] -= z_l
             
-        elif mode == 'tran':
-            dt = ctx.get('dt', DEFAULT_DT)
-            method = ctx.get('integration', 'trapezoidal')
-            if method == 'gear2':
-                r_eq = 1.5 * self.value / dt
-                v_hist = self.value / dt * (2.0 * self.i_prev - 0.5 * getattr(self, 'i_prev2', self.i_prev))
-            elif method == 'trapezoidal':
-                r_eq = 2.0 * self.value / dt
-                v_hist = r_eq * self.i_prev + self.v_prev
+        elif ctx.mode == 'tran':
+            i_prev = ctx.state_mgr.get(self, 'i_prev', 0.0)
+            v_prev = ctx.state_mgr.get(self, 'v_prev', 0.0)
+            
+            if ctx.integration == 'gear2':
+                i_prev2 = ctx.state_mgr.get(self, 'i_prev2', 0.0)
+                r_eq = 1.5 * self.value / ctx.dt
+                v_hist = self.value / ctx.dt * (2.0 * i_prev - 0.5 * i_prev2)
+            elif ctx.integration == 'trapezoidal':
+                r_eq = 2.0 * self.value / ctx.dt
+                v_hist = r_eq * i_prev + v_prev
             else:
-                r_eq = self.value / dt
-                v_hist = r_eq * self.i_prev
+                r_eq = self.value / ctx.dt
+                v_hist = r_eq * i_prev
 
             if self.n1 > 0:
                 A[self.n1 - 1, idx] += 1.0
@@ -171,18 +171,19 @@ class Inductor(BaseElement):
             A[idx, idx] -= r_eq
             b[idx] -= v_hist
 
-    def update_history(self, x, extra_idx=None, ctx=None, **kwargs):
-        ctx = ctx or kwargs  
+    def update_history(self, x, extra_idx=None, ctx=None):
         i_now = x[extra_idx] if extra_idx is not None else 0.0
         v_p = x[self.n1 - 1] if self.n1 > 0 else 0.0
         v_n = x[self.n2 - 1] if self.n2 > 0 else 0.0
         v_now = v_p - v_n
-        dt = ctx.get('dt')
-        method = ctx.get('integration', 'trapezoidal')
-        self.i_prev2 = self.i_prev  
-        if method == 'trapezoidal' and dt:
-            self.v_prev = v_now
-        self.i_prev = i_now
+        
+        i_prev = ctx.state_mgr.get(self, 'i_prev', 0.0)
+        ctx.state_mgr.set(self, 'i_prev2', i_prev) 
+        
+        if ctx.integration == 'trapezoidal' and ctx.dt:
+            ctx.state_mgr.set(self, 'v_prev', v_now)
+            
+        ctx.state_mgr.set(self, 'i_prev', i_now)
 
 
 class MutualInductance(BaseElement):
@@ -199,23 +200,23 @@ class MutualInductance(BaseElement):
         self.M = self.k * math.sqrt(self.l1_obj.value * self.l2_obj.value)
 
     def stamp(self, A, b, extra_idx=None, ctx=None):
-        ctx = ctx or {}
-        extra_map = ctx.get('extra_map', {})
-        idx1 = extra_map.get(self.l1_obj)
-        idx2 = extra_map.get(self.l2_obj)
+        idx1 = ctx.extra_map.get(self.l1_obj)
+        idx2 = ctx.extra_map.get(self.l2_obj)
         if idx1 is None or idx2 is None: return
 
-        mode = ctx.get('mode', 'op')
-        if mode == 'ac':
-            freq = ctx.get('freq', 1.0)
-            omega = 2.0 * math.pi * freq
+        if ctx.mode == 'ac':
+            omega = 2.0 * math.pi * ctx.freq
             zm = complex(0, omega * self.M)
             A[idx1, idx2] -= zm
             A[idx2, idx1] -= zm
-        elif mode == 'tran':
-            dt = ctx.get('dt', DEFAULT_DT)
-            rm = self.M / dt
+        elif ctx.mode == 'tran':
+            rm = self.M / ctx.dt
             A[idx1, idx2] -= rm
             A[idx2, idx1] -= rm
-            b[idx1] -= rm * self.l2_obj.i_prev
-            b[idx2] -= rm * self.l1_obj.i_prev
+            
+            # 🚀 互感電流相依性：直接從 state_mgr 讀取兩個目標電感的歷史狀態
+            l1_i_prev = ctx.state_mgr.get(self.l1_obj, 'i_prev', 0.0)
+            l2_i_prev = ctx.state_mgr.get(self.l2_obj, 'i_prev', 0.0)
+            
+            b[idx1] -= rm * l2_i_prev
+            b[idx2] -= rm * l1_i_prev

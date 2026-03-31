@@ -113,10 +113,22 @@ class SpiceParser:
         }
 
     def _flatten_subckts(self):
-        """將所有 X 開頭的呼叫替換為實際元件，並自動產生 Prefix 避免名稱衝突"""
+        """將所有 X 開呼叫替換為實際元件，處理地節點保護與模型作用域"""
         flat_elements = []
+        global_models = list(self.circuit.get("models", []))
         
-        def expand(elements, prefix, node_map):
+        def expand(elements, prefix, node_map, subckt_models=None):
+            # 🚀 處理模型展平：如果子電路內有定義模型，將其改名後加入全域
+            if subckt_models:
+                for m_name, m_def in subckt_models.items():
+                    new_m = copy.deepcopy(m_def)
+                    # 讓模型名稱也帶上 Prefix，例如 XQ1.DMOD
+                    new_m_name = f"{prefix}{m_name}"
+                    # 這裡要確保存入全域模型清單 (格式需符合你的 Circuit 結構)
+                    if "name" not in new_m: new_m["name"] = new_m_name
+                    else: new_m["name"] = new_m_name
+                    global_models.append(new_m)
+
             for el in elements:
                 if el.get("type") == "subckt_call":
                     sub_def = self.circuit["subckts"].get(el["subname"])
@@ -124,36 +136,44 @@ class SpiceParser:
                         self._log_diag(0, "ERROR", f"Subcircuit '{el['subname']}' not found")
                         continue
                     
-                    # 建立內外節點的映射表
                     new_node_map = {}
                     for i, pin in enumerate(sub_def["pins"]):
+                        # 抓取呼叫時傳入的外部節點名稱
                         ext_node = el["pins"].get(f"p{i}")
-                        # 處理巢狀：如果外面的節點已經是被 mapping 過的，就繼續往下傳遞
+                        # 處理巢狀節點映射
                         new_node_map[pin] = node_map.get(ext_node, ext_node)
-                        
-                    # 產生下一層的 Prefix (例如 X1.X2.)
+                    
                     new_prefix = f"{prefix}{el['name']}."
-                    expand(sub_def["elements"], new_prefix, new_node_map)
+                    # 遞迴展開，傳入該子電路內部的模型
+                    expand(sub_def["elements"], new_prefix, new_node_map, sub_def.get("models", {}))
                     
                 else:
-                    # 深拷貝元件，避免修改到原始藍圖
                     new_el = copy.deepcopy(el)
                     new_el["name"] = f"{prefix}{new_el['name']}"
                     
-                    # 重新命名所有節點 (0 / 接地點永遠不變)
+                    # 🚀 重新命名模型參考
+                    if "model" in new_el:
+                        # 優先指向子電路內部的改名模型
+                        new_el["model"] = f"{prefix}{new_el['model']}"
+                    
+                    # 🚀 重新命名節點 (加入 GND 保護)
                     for pin_cat in ["pins", "ctrl_pins"]:
                         if pin_cat in new_el:
                             for k, v in new_el[pin_cat].items():
-                                if v != "0": 
+                                # 🛡️ 關鍵修正：如果 v 是 '0'，絕對不能加前綴！
+                                if str(v) == "0":
+                                    new_el[pin_cat][k] = "0"
+                                else:
+                                    # 先看 mapping (對外腳位)，沒有的話才視為內部節點加前綴
                                     new_el[pin_cat][k] = node_map.get(v, f"{prefix}{v}" if prefix else v)
                                     
-                    # 重新命名交叉參照 (H, F 等受控源的控制對象也要加上 Prefix)
                     for ref_field in ["ctrl_source", "element1", "element2"]:
                         if ref_field in new_el:
                             new_el[ref_field] = f"{prefix}{new_el[ref_field]}"
                             
                     flat_elements.append(new_el)
                     
-        # 啟動第一層遞迴展開
+        # 啟動展開
         expand(self.circuit["elements"], "", {})
         self.circuit["elements"] = flat_elements
+        self.circuit["models"] = global_models # 更新回展平後的模型清單

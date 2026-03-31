@@ -70,7 +70,8 @@ class CCVS(BaseElement):
         self.extra_vars = 1
 
     def stamp(self, A, b, extra_idx=None, ctx=None):
-        ctrl_idx = ctx.get('extra_by_name', {}).get(self.ctrl_source)
+        # 🚀 升級為強型別屬性存取
+        ctrl_idx = ctx.extra_by_name.get(self.ctrl_source)
         if ctrl_idx is None:
             raise ValueError(f"[CCVS] 找不到控制電源 '{self.ctrl_source}'，請確認該電源存在於電路中。 ({self.name})")
 
@@ -100,7 +101,8 @@ class CCCS(BaseElement):
         self.gain = float(gain)
 
     def stamp(self, A, b, extra_idx=None, ctx=None):
-        ctrl_idx = ctx.get('extra_by_name', {}).get(self.ctrl_source)
+        # 🚀 升級為強型別屬性存取
+        ctrl_idx = ctx.extra_by_name.get(self.ctrl_source)
         if ctrl_idx is None:
             raise ValueError(f"[CCCS] 找不到控制電源 '{self.ctrl_source}'，請確認該電源存在於電路中。 ({self.name})")
         

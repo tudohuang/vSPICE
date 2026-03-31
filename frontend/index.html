@@ -7,6 +7,7 @@
   <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #0d1117;
@@ -33,21 +34,21 @@
     }
 
     ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px
+      width: 6px;
+      height: 6px;
     }
 
     ::-webkit-scrollbar-track {
-      background: var(--bg)
+      background: transparent;
     }
 
     ::-webkit-scrollbar-thumb {
-      background: #30363d;
-      border-radius: 4px
+      background: color-mix(in srgb, var(--txm) 40%, transparent);
+      border-radius: 10px;
     }
 
     ::-webkit-scrollbar-thumb:hover {
-      background: #484f58
+      background: color-mix(in srgb, var(--txm) 70%, transparent);
     }
 
     body {
@@ -55,10 +56,35 @@
       height: 100vh;
       display: flex;
       flex-direction: column;
-      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-family: 'Inter', system-ui, sans-serif;
       background: var(--bg);
       color: var(--tx);
-      overflow: hidden
+      overflow: hidden;
+      position: relative;
+      z-index: 0;
+    }
+
+    body::before {
+      content: "";
+      position: absolute;
+      top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(circle at 30% 30%, var(--accg), transparent 45%),
+                  radial-gradient(circle at 80% 80%, rgba(90, 150, 255, 0.08), transparent 50%);
+      animation: ambientGlow 25s ease-in-out infinite alternate;
+      z-index: -1;
+      pointer-events: none;
+    }
+
+    @keyframes ambientGlow {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-2%, 2%) scale(1.05); }
+    }
+
+    .topbar, .toolbar, .nav-rail, .sidebar, .right, .term, .sbar, .ted-box, .ctx, .pal, .dropdown {
+      background: color-mix(in srgb, var(--bg2) 65%, transparent) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-color: color-mix(in srgb, var(--bdr) 60%, transparent) !important;
     }
 
     body.no-select {
@@ -183,25 +209,31 @@
       display: flex;
       align-items: center;
       gap: 5px;
-      border-radius: 4px;
-      transition: .2s
+      border-radius: 6px;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .tool-btn:hover {
-      background: rgba(255, 255, 255, .04);
-      border-color: var(--bdr)
+      background: rgba(255, 255, 255, .08);
+      border-color: var(--bdr);
+      transform: translateY(-1px);
+    }
+
+    .tool-btn:active {
+      transform: translateY(0);
     }
 
     .tool-btn.run {
-      background: var(--acc);
+      background: linear-gradient(135deg, var(--acc2), var(--acc));
       color: #000;
-      border-color: var(--acc);
-      font-weight: 600
+      border: none;
+      font-weight: 700;
+      box-shadow: 0 4px 12px var(--accg);
     }
 
     .tool-btn.run:hover {
-      background: var(--acc2);
-      box-shadow: 0 0 12px var(--accg)
+      box-shadow: 0 6px 16px var(--accg);
+      transform: translateY(-2px);
     }
 
     .tool-sep {
@@ -319,18 +351,21 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      transition: .1s;
-      border-radius: 4px;
-      margin: 1px 4px
+      transition: all 0.2s ease;
+      border-radius: 6px;
+      margin: 2px 6px;
+      border: 1px solid transparent;
     }
 
     .fi:hover {
-      background: rgba(255, 255, 255, .04)
+      background: rgba(255, 255, 255, .06);
+      transform: translateX(2px);
     }
 
     .fi.active {
       background: var(--accg);
-      color: var(--acc)
+      color: var(--acc);
+      border-color: color-mix(in srgb, var(--acc) 30%, transparent);
     }
 
     .fi i {
@@ -579,35 +614,45 @@
       height: 100%;
       overflow-y: auto;
       padding: 16px;
-      background: var(--bg)
+      background: transparent;
     }
 
     .ot {
       width: 100%;
-      border-collapse: collapse;
+      border-collapse: separate;
+      border-spacing: 0 4px;
       font-family: Consolas, monospace;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--tx)
     }
 
     .ot th {
-      background: var(--bg2);
+      background: color-mix(in srgb, var(--bg2) 65%, transparent);
       color: var(--acc);
       text-align: left;
-      padding: 10px 14px;
-      border-bottom: 2px solid var(--acc);
+      padding: 12px 14px;
       position: sticky;
       top: 0;
-      font-weight: 600
+      font-weight: 700;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 10;
+      border-radius: 6px;
     }
 
     .ot td {
-      padding: 8px 14px;
-      border-bottom: 1px solid var(--bdr)
+      padding: 10px 14px;
+      background: color-mix(in srgb, var(--bg) 60%, transparent);
+      backdrop-filter: blur(4px);
     }
+    
+    .ot tr td:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+    .ot tr td:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 
-    .ot tr:hover {
-      background: rgba(0, 224, 160, .04)
+    .ot tr:hover td {
+      background: rgba(255, 255, 255, .05);
+      transform: scale(1.005);
+      transition: all 0.2s;
     }
 
     .vp {
@@ -1155,11 +1200,10 @@
     let E = null, files = {}, tabs = [], active = null, tabN = 0, lastP = null, lastX = '', fontSize = 14, globalSimResult = null;
     function hex2rgba(h, a) { const n = parseInt(h.replace('#', ''), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})` }
 
-    // ── Themes ──
     const THEMES = [
-      { name: 'Oscilloscope', acc: '#00e0a0', acc2: '#00b882', bg: '#0d1117', bg2: '#161b22', bdr: '#30363d', tx: '#c9d1d9', txm: '#6e7681', grid: '#1a2332', ci: '#58a6ff', ce: '#f85149', cs: '#3fb950', cw: '#d29922', monaco: 'spice-dark', plotClr: ['#00ffcc', '#ff3366', '#ffcc00', '#cc66ff', '#3399ff', '#ff9500', '#00ccff'] },
-      { name: 'Midnight', acc: '#7c93ff', acc2: '#5b73e8', bg: '#0b0e1a', bg2: '#111528', bdr: '#252a40', tx: '#b8c0e0', txm: '#5a6080', grid: '#10132a', ci: '#6eaaff', ce: '#ff6b6b', cs: '#66d9a0', cw: '#e8b84d', monaco: 'spice-midnight', plotClr: ['#6eaaff', '#ff6b6b', '#e8b84d', '#b87fff', '#66d9a0', '#ff8c42', '#42c6ff'] },
-      { name: 'Amber', acc: '#ffb347', acc2: '#e09830', bg: '#1a1410', bg2: '#221c15', bdr: '#3a3228', tx: '#d4c8b8', txm: '#887860', grid: '#1e1812', ci: '#7cb8ff', ce: '#ff6666', cs: '#7dcc8a', cw: '#e8c44d', monaco: 'spice-amber', plotClr: ['#ffb347', '#ff6666', '#7cb8ff', '#cc99ff', '#7dcc8a', '#ff8855', '#44ccbb'] }
+      { name: 'Oscilloscope', acc: '#00ffcc', acc2: '#00d4aa', bg: '#050714', bg2: '#0d122b', bdr: '#1c254a', tx: '#d1e0f0', txm: '#7083a0', grid: '#0f1636', ci: '#58a6ff', ce: '#ff4d4d', cs: '#3fb950', cw: '#ffb300', monaco: 'spice-dark', plotClr: ['#00ffcc', '#ff3366', '#ffcc00', '#cc66ff', '#3399ff', '#ff9500', '#00ccff'] },
+      { name: 'Neon Midnight', acc: '#a37cff', acc2: '#875ae8', bg: '#060310', bg2: '#0e0821', bdr: '#23164a', tx: '#c5bde8', txm: '#6b648c', grid: '#120a28', ci: '#6eaaff', ce: '#ff4d60', cs: '#35de8d', cw: '#f0c651', monaco: 'spice-midnight', plotClr: ['#a37cff', '#ff4d60', '#f0c651', '#42c6ff', '#35de8d', '#ff8c42', '#ff66d9'] },
+      { name: 'Vibrant Amber', acc: '#ffb347', acc2: '#e09528', bg: '#120803', bg2: '#201007', bdr: '#3f1f0e', tx: '#f0dfcf', txm: '#96816a', grid: '#1c0f07', ci: '#6eaaff', ce: '#ff5555', cs: '#5bd676', cw: '#f5cc45', monaco: 'spice-amber', plotClr: ['#ffb347', '#ff5555', '#6eaaff', '#cc99ff', '#5bd676', '#ff8855', '#44ccbb'] }
     ];
     let themeIdx = 0;
 

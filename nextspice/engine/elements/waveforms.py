@@ -2,11 +2,89 @@ import re
 import math
 from nextspice.utils.unit_conv import UnitConverter as unit_conv
 
+class BaseWaveform:
+    """波形物件基底類別"""
+    def eval(self, t):
+        raise NotImplementedError("Subclasses must implement eval(t)")
+
+class DCWaveform(BaseWaveform):
+    """純直流波形 (Fallback 預設值)"""
+    def __init__(self, value):
+        self.value = float(value)
+        
+    def eval(self, t):
+        return self.value
+
+class SinWaveform(BaseWaveform):
+    """正弦波 SIN(VO VA FREQ TD THETA)"""
+    def __init__(self, vo, va, freq, td, theta):
+        self.vo = float(vo)
+        self.va = float(va)
+        self.freq = float(freq)
+        self.td = float(td)
+        self.theta = float(theta)
+
+    def eval(self, t):
+        if t < self.td:
+            return self.vo
+        return self.vo + self.va * math.exp(-self.theta * (t - self.td)) * math.sin(2 * math.pi * self.freq * (t - self.td))
+
+class PulseWaveform(BaseWaveform):
+    """脈衝波 PULSE(V1 V2 TD TR TF PW PER)"""
+    def __init__(self, v1, v2, td, tr, tf, pw, per):
+        self.v1 = float(v1)
+        self.v2 = float(v2)
+        self.td = float(td)
+        self.tr = float(tr)
+        self.tf = float(tf)
+        self.pw = float(pw)
+        self.per = float(per)
+
+    def eval(self, t):
+        if t < self.td:
+            return self.v1
+
+        t_cycle = (t - self.td) % self.per if self.per > 0 else (t - self.td)
+
+        if t_cycle < self.tr:
+            return self.v1 + (self.v2 - self.v1) * (t_cycle / self.tr) if self.tr > 0 else self.v2
+        elif t_cycle < self.tr + self.pw:
+            return self.v2
+        elif t_cycle < self.tr + self.pw + self.tf:
+            return self.v2 - (self.v2 - self.v1) * ((t_cycle - self.tr - self.pw) / self.tf) if self.tf > 0 else self.v1
+        else:
+            return self.v1
+
+class PwlWaveform(BaseWaveform):
+    """分段線性波形 PWL(T1 V1 T2 V2 ...)"""
+    def __init__(self, pts):
+        # 預先算好並儲存座標對，eval 時完全不用再切陣列
+        self.pts = pts
+        
+    def eval(self, t):
+        if t <= self.pts[0][0]:
+            return self.pts[0][1]
+            
+        if t >= self.pts[-1][0]:
+            return self.pts[-1][1]
+            
+        for i in range(len(self.pts) - 1):
+            t1, v1 = self.pts[i]
+            t2, v2 = self.pts[i+1]
+            
+            if t1 <= t <= t2:
+                if t2 == t1:
+                    return v2
+                return v1 + (v2 - v1) * (t - t1) / (t2 - t1)
+                
+        return self.pts[-1][1]
+
+# =====================================================================
+# 🛠️ 波形編譯器 (Factory) - 整個模擬只會在初始化時跑一次！
+# =====================================================================
+
 def _ensure_numeric(raw_args, wtype):
-    """
-    確保所有解析出來的參數都是合法的數值 (float / int)。
-    防止未展開的變數 (如 {VAR}) 進入數學運算導致靜默錯誤或崩潰。
-    """
+    """將字串陣列轉換為浮點數陣列，並透過 UnitConverter 展開 k, m, u 等單位"""
     numeric_args = []
     for x in raw_args:
         val = unit_conv.parse(x)
@@ -15,112 +93,42 @@ def _ensure_numeric(raw_args, wtype):
         numeric_args.append(float(val))
     return numeric_args
 
-def eval_source_waveform(tran_str, dc_value, t):
+def compile_waveform(tran_str, dc_value):
     """
-    根據當下時間 t，計算時域波形的瞬間數值 (電壓或電流共用)。
-    作為波形分發器 (Router)，負責解析字串並呼叫對應的純數學計算函數。
+    將 SPICE 波形字串「編譯」為高效能的波形物件。
     """
     if not tran_str:
-        return float(dc_value)
+        return DCWaveform(dc_value)
 
     tran_upper = tran_str.upper()
     
     match = re.search(r'\((.*?)\)', tran_upper)
     if not match:
-        return float(dc_value)
+        return DCWaveform(dc_value)
         
     raw_args = match.group(1).replace(',', ' ').split()
     if not raw_args:
-        return float(dc_value)
+        return DCWaveform(dc_value)
 
-    # === 根據波形前綴進行路由與嚴格檢查 ===
+    # === 根據波形前綴進行路由與編譯 ===
     if tran_upper.startswith("SIN"):
         args = _ensure_numeric(raw_args, "SIN")
-        return _eval_sin(args, t)
+        args += [0.0] * (5 - len(args))  # 自動補齊缺少的預設值
+        return SinWaveform(*args[:5])
         
     elif tran_upper.startswith("PULSE"):
         args = _ensure_numeric(raw_args, "PULSE")
-        return _eval_pulse(args, t)
+        args += [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0]  # 自動補齊
+        return PulseWaveform(*args[:7])
         
     elif tran_upper.startswith("PWL"):
         args = _ensure_numeric(raw_args, "PWL")
-        
-        # 🚀 致命防呆：PWL 必須是 (時間, 電壓) 座標對
         if len(args) % 2 != 0:
             raise ValueError(f"[PWL] 參數必須是成對的 (時間, 數值)，但目前解析出 {len(args)} 個參數: {raw_args}")
         if len(args) < 2:
-            return float(dc_value)
+            return DCWaveform(dc_value)
             
-        return _eval_pwl(args, t)
+        pts = [(args[i], args[i+1]) for i in range(0, len(args)-1, 2)]
+        return PwlWaveform(pts)
 
-    return float(dc_value)
-
-
-# =====================================================================
-# 🧮 以下為各波形的純數學計算邏輯 (Pure Functions)
-# =====================================================================
-
-def _eval_sin(args, t):
-    """計算正弦波 SIN(VO VA FREQ TD THETA)"""
-    vo = args[0] if len(args) > 0 else 0.0      # DC 偏移量
-    va = args[1] if len(args) > 1 else 0.0      # 振幅
-    freq = args[2] if len(args) > 2 else 0.0    # 頻率
-    td = args[3] if len(args) > 3 else 0.0      # 延遲時間
-    theta = args[4] if len(args) > 4 else 0.0   # 阻尼系數
-    
-    if t < td:
-        return vo
-    return vo + va * math.exp(-theta * (t - td)) * math.sin(2 * math.pi * freq * (t - td))
-
-
-def _eval_pulse(args, t):
-    """計算脈衝方波 PULSE(V1 V2 TD TR TF PW PER)"""
-    v1 = args[0] if len(args) > 0 else 0.0      # 初始值
-    v2 = args[1] if len(args) > 1 else 0.0      # 脈衝值
-    td = args[2] if len(args) > 2 else 0.0      # 延遲時間
-    tr = args[3] if len(args) > 3 else 0.0      # 上升時間
-    tf = args[4] if len(args) > 4 else 0.0      # 下降時間
-    pw = args[5] if len(args) > 5 else 1.0      # 脈衝寬度
-    per = args[6] if len(args) > 6 else 1.0     # 週期
-
-    if t < td:
-        return v1
-
-    t_cycle = (t - td) % per if per > 0 else (t - td)
-
-    if t_cycle < tr:
-        return v1 + (v2 - v1) * (t_cycle / tr) if tr > 0 else v2
-    elif t_cycle < tr + pw:
-        return v2
-    elif t_cycle < tr + pw + tf:
-        return v2 - (v2 - v1) * ((t_cycle - tr - pw) / tf) if tf > 0 else v1
-    else:
-        return v1
-
-
-def _eval_pwl(args, t):
-    """計算分段線性波形 PWL(T1 V1 T2 V2 ...)"""
-    # 轉換為 (時間, 數值) 座標對陣列
-    pts = [(args[i], args[i+1]) for i in range(0, len(args)-1, 2)]
-    
-    # 狀態 1：時間還沒到第一個點
-    if t <= pts[0][0]:
-        return pts[0][1]
-        
-    # 狀態 2：時間已經超過最後一個點
-    if t >= pts[-1][0]:
-        return pts[-1][1]
-        
-    # 狀態 3：尋找對應的區間進行「線性內插」
-    for i in range(len(pts) - 1):
-        t1, v1 = pts[i]
-        t2, v2 = pts[i+1]
-        
-        if t1 <= t <= t2:
-            # 防呆：如果兩個點時間一樣 (垂直線)，直接回傳後面的值避免除以零
-            if t2 == t1:
-                return v2
-            # 線性內插公式：V(t) = V1 + (V2 - V1) * (t - t1) / (t2 - t1)
-            return v1 + (v2 - v1) * (t - t1) / (t2 - t1)
-            
-    return pts[-1][1] # Fallback 防呆
+    return DCWaveform(dc_value)

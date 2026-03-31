@@ -32,7 +32,13 @@ def parse_element(item, circuit, diagnostics, eval_func):
     tk = item["tokens"]
     ln = item["line_no"]
     name = tk[0].upper()
-    prefix = name[0]
+    
+    if name.startswith('VM'):
+        prefix = 'VM'
+    elif name.startswith('AM'):
+        prefix = 'AM'
+    else:
+        prefix = name[0]
 
     def log_err(msg): diagnostics.append({"line": ln, "severity": "ERROR", "message": msg})
 
@@ -131,6 +137,29 @@ def parse_element(item, circuit, diagnostics, eval_func):
                 "emitter": norm_node(tk[3]),
                 "model": tk[4].upper()
             })
+
+        elif prefix == 'M':
+            if len(tk) < 6: raise ValueError("MOSFET (M) requires D, G, S, B nodes and model")
+            
+            params = {}
+            for token in tk[6:]:
+                if '=' in token:
+                    k, v = token.split('=', 1)
+                    params[k.lower()] = eval_func(v)
+                    
+            circuit["elements"].append({
+                "type": "mosfet",
+                "name": name,
+                "drain": norm_node(tk[1]),
+                "gate": norm_node(tk[2]),
+                "source": norm_node(tk[3]),
+                "bulk": norm_node(tk[4]),
+                "model": tk[5].upper(),
+                "w": params.get('w', 1e-6),
+                "l": params.get('l', 1e-6)
+            })
+
+
         else:
             diagnostics.append({"line": ln, "severity": "WARNING", "message": f"Unsupported prefix '{prefix}' for {name}"})
     except Exception as e:
