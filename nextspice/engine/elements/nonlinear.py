@@ -29,14 +29,15 @@ class Diode(BaseElement):
         v_n = x_old[self.n2 - 1] if self.n2 > 0 else 0.0
         vd_raw = v_p - v_n
         
-        # 🚀 從狀態管理器取得上一次疊代的電壓
         v_prev = ctx.state_mgr.get(self, 'v_prev', 0.0)
         
         vd_safe = adaptive_junction_clamp(vd_raw, v_prev, self.vt * self.n, self.vcrit)
         
-        # 🚀 寫入狀態，供下一次 Newton-Raphson 疊代使用
-        ctx.state_mgr.set(self, 'v_prev', vd_safe)
+        is_clamped = abs(vd_safe - vd_raw) > 1e-3
+        ctx.state_mgr.set(self, 'clamped', is_clamped, scope='nr')
         
+        ctx.state_mgr.set(self, 'v_prev', vd_safe)
+
         nVt = self.n * self.vt
         exp_term = math.exp(min(vd_safe / nVt, EXP_LIMIT))
         
@@ -75,7 +76,6 @@ class LED(Diode):
         self.color = color.upper()
         params = self.COLORS.get(self.color, self.COLORS['RED'])
         
-        # 直接呼叫老爸 (Diode) 的 __init__，把參數塞進去
         super().__init__(name, n1, n2, is_sat=params['is_sat'], n=params['n'], temp=temp)
 
     def get_brightness_percent(self, v_p, v_n):
@@ -134,17 +134,18 @@ class BJT(BaseElement):
         vbe_raw = self.bjt_type * (vb - ve)
         vbc_raw = self.bjt_type * (vb - vc)
 
-        # 🚀 撈取舊狀態
+        # 撈取舊狀態
         vbe_prev = ctx.state_mgr.get(self, 'vbe_prev', 0.0)
         vbc_prev = ctx.state_mgr.get(self, 'vbc_prev', 0.0)
 
         vbe_safe = adaptive_junction_clamp(vbe_raw, vbe_prev, self.vt, self.vcrit_f)
         vbc_safe = adaptive_junction_clamp(vbc_raw, vbc_prev, self.vt, self.vcrit_r)
 
-        # 🚀 寫入新狀態
+        is_clamped = abs(vbe_safe - vbe_raw) > 1e-3 or abs(vbc_safe - vbc_raw) > 1e-3
+        ctx.state_mgr.set(self, 'clamped', is_clamped, scope='nr')
+
         ctx.state_mgr.set(self, 'vbe_prev', vbe_safe)
         ctx.state_mgr.set(self, 'vbc_prev', vbc_safe)
-
         exp_f = math.exp(min(vbe_safe / self.vt, EXP_LIMIT))
         exp_r = math.exp(min(vbc_safe / self.vt, EXP_LIMIT))
 
@@ -157,7 +158,7 @@ class BJT(BaseElement):
         g_f += GMIN_NONLINEAR
         g_r += GMIN_NONLINEAR
 
-        # 🚀 儲存 AC 小訊號分析所需要的跨導參數！
+        # 儲存 AC 小訊號分析所需要的跨導參數！
         ctx.state_mgr.set(self, 'gf_ac', g_f)
         ctx.state_mgr.set(self, 'gr_ac', g_r)
 

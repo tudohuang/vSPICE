@@ -137,26 +137,22 @@ def parse_element(item, circuit, diagnostics, eval_func):
                 "emitter": norm_node(tk[3]),
                 "model": tk[4].upper()
             })
-
         elif prefix == 'M':
             if len(tk) < 6: raise ValueError("MOSFET (M) requires D, G, S, B nodes and model")
-            
             params = {}
             for token in tk[6:]:
                 if '=' in token:
                     k, v = token.split('=', 1)
                     params[k.lower()] = eval_func(v)
-                    
             circuit["elements"].append({
                 "type": "mosfet",
                 "name": name,
-                "drain": norm_node(tk[1]),
-                "gate": norm_node(tk[2]),
-                "source": norm_node(tk[3]),
-                "bulk": norm_node(tk[4]),
+                "pins": {
+                    "d": norm_node(tk[1]), "g": norm_node(tk[2]),
+                    "s": norm_node(tk[3]), "b": norm_node(tk[4])
+                },
                 "model": tk[5].upper(),
-                "w": params.get('w', 1e-6),
-                "l": params.get('l', 1e-6)
+                "w": params.get('w', 1e-6), "l": params.get('l', 1e-6)
             })
 
 

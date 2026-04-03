@@ -102,6 +102,16 @@ class Capacitor(BaseElement):
             
         ctx.state_mgr.set(self, 'v_prev', v_now)
 
+    def init_history(self, x_op, extra_idx=None, ctx=None):
+        """核心修復 REG-TR01: 從 OP 狀態正確初始化歷史"""
+        v_p = x_op[self.n1 - 1] if self.n1 > 0 else 0.0
+        v_n = x_op[self.n2 - 1] if self.n2 > 0 else 0.0
+        v_op = v_p - v_n
+        ctx.state_mgr.set(self, 'v_prev', v_op)
+        ctx.state_mgr.set(self, 'v_prev2', v_op)  # 給 Gear2 備用
+        ctx.state_mgr.set(self, 'i_prev', 0.0)    # DC 穩態電容無電流
+        ctx.state_mgr.set(self, 'i_prev2', 0.0)
+
 
 class Inductor(BaseElement):
     """
@@ -184,6 +194,13 @@ class Inductor(BaseElement):
             ctx.state_mgr.set(self, 'v_prev', v_now)
             
         ctx.state_mgr.set(self, 'i_prev', i_now)
+
+    def init_history(self, x_op, extra_idx=None, ctx=None):
+        """核心修復 REG-TR01: 從 OP 狀態正確初始化歷史"""
+        i_op = x_op[extra_idx] if extra_idx is not None else 0.0
+        ctx.state_mgr.set(self, 'i_prev', i_op)
+        ctx.state_mgr.set(self, 'i_prev2', i_op)
+        ctx.state_mgr.set(self, 'v_prev', 0.0)    # DC 穩態電感無跨壓
 
 
 class MutualInductance(BaseElement):

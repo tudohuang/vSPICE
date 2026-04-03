@@ -158,7 +158,17 @@ class Simulator:
 
             conv_diff = np.abs(x_new - x_guess)
             tolerance = reltol * np.maximum(np.abs(x_new), np.abs(x_guess)) + abstol
-            if np.all(conv_diff <= tolerance):
+            
+            # 核心修復 REG-OP01：檢查非線性元件是否行使了否決權
+            nonlin_converged = True
+            for el in self.circuit.elements:
+                if getattr(el, 'is_nonlinear', False):
+                    if ctx.state_mgr.get(el, 'clamped', False, scope='nr'):
+                        nonlin_converged = False
+                        break
+
+            # 必須矩陣變化夠小，且沒有元件被嚴重 Clamp，才算真正收斂！
+            if np.all(conv_diff <= tolerance) and nonlin_converged:
                 residual = np.max(np.abs(A_csr.dot(x_new) - b))
                 return x_new, residual, None, method_used
 
@@ -302,9 +312,12 @@ class Simulator:
         
         # 通知元件記錄初始歷史
         for el in self.circuit.elements:
-            if hasattr(el, 'update_history'):
+            if hasattr(el, 'init_history'):
+                el.init_history(x_prev, extra_idx=self.extra_var_map.get(el), ctx=ctx)
+            elif hasattr(el, 'update_history'):
+                # 為了向下相容沒有寫 init_history 的元件
                 el.update_history(x_prev, extra_idx=self.extra_var_map.get(el), ctx=ctx)
-
+        
         t = tstep
         first_step = True
         current_dt = tstep
